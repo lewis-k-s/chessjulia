@@ -1,0 +1,4 @@
+name = "Chess"
+uuid = "71bc6ef7-59fc-4b0b-939f-13869b46c788"
+authors = ["lewis.knox <lewis.lockedout@gmail.com>"]
+version = "0.1.0"
