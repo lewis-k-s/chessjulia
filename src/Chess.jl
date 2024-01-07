@@ -49,9 +49,9 @@ export
 
 function start()
     # TODO: this will also need to return an Options instance
-    uci_chan_in, uci_chan_out = UCI.start()
+    uci_chan_in, uci_chan_out = Uci.start()
 
-    if take!(uci_chan_in) isa UCI.UCINewGame
+    if take!(uci_chan_in) isa Uci.UCINewGame
         game = Game()
         engine_loop(game, uci_chan_in, uci_chan_out)
     # should handle `position` without `newgame` ??
@@ -72,18 +72,18 @@ function engine_loop(game::Game, uci_chan_in, uci_chan_out)
         if isready(uci_chan_in)
             @debug "engine loop: reading new UCI command"
             cmd = take!(uci_chan_in)
-            @assert cmd isa UCI.UCICommandReceive
-            if cmd isa UCI.UCIGo
+            @assert cmd isa Uci.UCICommandReceive
+            if cmd isa Uci.UCIGo
                 searching = true
                 search_progress = search(game, search_progress)
                 put!(uci_chan_out, search_progress.info)
             # this should be received first (usually with `position startpos`)
-            elseif cmd isa UCI.UCIPosition
+            elseif cmd isa Uci.UCIPosition
                 game_components = setpos(cmd.fen)
                 game = Game(game_components...)
-            elseif cmd isa UCI.UCIStop
-                put!(uci_chan_out, UCI.UCIBestMove("TODO", "TODO"))
-            elseif cmd isa UCI.UCIQuit
+            elseif cmd isa Uci.UCIStop
+                put!(uci_chan_out, Uci.UCIBestMove("TODO", "TODO"))
+            elseif cmd isa Uci.UCIQuit
                 @debug "UCI: quitting"
                 break
             else error("UCI: unexpected command")

@@ -25,6 +25,15 @@ abstract type UCICommand end
 abstract type UCICommandReceive <: UCICommand end
 abstract type UCICommandResponse <: UCICommand end
 
+"""
+Allows us to propagate parsing errors, since throwing an exception in our interactive thread would be bad.
+Also those errors don't propagate to the main thread, so they just stop the interactive thread invisibly.
+"""
+struct UCIError <: UCICommand
+    msg :: String
+end
+
+
 ###################################
 # UCI commands from GUI to engine #
 ###################################
@@ -103,6 +112,11 @@ struct UCIBestMove <: UCICommandResponse
     ponder :: String
 end
 
+# these channels are returned by `start()` but NOT exported by this module.
+# channel in is buffered so that we can still read from stdin while we process the commands
+UCI_CHAN_IN = Channel{UCICommandReceive}(5)
+UCI_CHAN_OUT = Channel{UCICommandResponse}(0)
+
 ######################################
 # Print UCICommandResponse to stdout #
 ######################################
@@ -173,30 +187,28 @@ function parse_go(uci_go :: UCIGo, line :: String)
             uci_go.infinite = true
             line = line[9:end]
         else
-            error("Invalid UCI `go` field")
+            return UCIError("Invalid UCI `go` field")
         end
     end
     return uci_go
 end
     
-"takes a string and returns a UCICommand"
+"takes a string and returns a UCICommand or UCIError"
 function parse_uci(line :: String)
     if line == "uci"
         return UCIUCI()
-    elseif line == "newgame"
+    elseif line == "ucinewgame"
         return UCINewGame()
     elseif line == "ponderhit"
         return UCIPonderHit()
     elseif line == "stop"
         return UCIStop()
-    elseif line == "ready"
-        return UCIReady()
     elseif line == "isready"
-        return UCIReady()
+        return UCIIsReady()
     elseif startswith(line, "go")
         return parse_go(UCIGo(), line[3:end])
     # position [ fen fenstring | startpos ] moves {move1} ... {movei}
-    elseif startswith("position", line)
+    elseif startswith(line, "position")
         m = match(r"^position (startpos|fen \S+) ?(moves \S+)?$", line)
         moves = m[2] ? match(r"([prnbqk](x[prnbqk])?[1-8])+", m[2]).captures : []
         pos = m[1]
@@ -207,7 +219,7 @@ function parse_uci(line :: String)
         end
         return UCIPosition(pos, moves)
     else
-        error("Invalid UCI command")
+        return UCIError("Invalid UCI command")
     end
 end
 
@@ -215,20 +227,25 @@ end
 # Run uci interactive thread and talk to GUI #
 ##############################################
 
-"Startup handshake, option setting, and first position"
-function init_sequence(uci_chan_in::Channel{UCICommandReceive}, uci_chan_out::Channel{UCICommandResponse}) 
-    if take!(uci_chan_in) isa UCIUCI
-        put!(uci_chan_out, UCIID())
-        put!(uci_chan_out, UCIUCIOK())
+#TODO: actually parse the options
+"""
+At this point the GUI can send as many `option` commands as it likes before `isready`
+"""
+setoption_cycle(:: UCISetOption) = setoption_cycle(take!(UCI_CHAN_IN))
+setoption_cycle(:: UCIIsReady) = put!(UCI_CHAN_OUT, UCIReadyOK())
+
+"Startup handshake, option setting, and receiving first position"
+function init_sequence() 
+    @debug "uci initialisation sequence"
+    if take!(UCI_CHAN_IN) isa UCIUCI
+        put!(UCI_CHAN_OUT, UCIID())
+        put!(UCI_CHAN_OUT, UCIUCIOK())
     else error("First command must be 'uci'")
     end
 
-    uci_msg = take!(uci_chan_in)
+    uci_msg = take!(UCI_CHAN_IN)
     setoption_cycle(uci_msg)
 
-    # currently do nothing on `setoption`
-    setoption_cycle = (:: UCISetOption) -> setoption_cycle(take!(uci_chan_in))
-    setoption_cycle = (:: UCIIsReady) -> put!(uci_chan_out, UCIReadyOK())
 end
 
 """
@@ -237,32 +254,50 @@ The engine should then wait for a `UCINewGame` or `UCIPosition` command.
 """
 function start()
     if Threads.nthreads(:interactive) == 0
-        # create two unbuffered channels for the inputs from and responses to the GUI
-        uci_chan_in = Channel{UCICommandReceive}(0)
-        uci_chan_out = Channel{UCICommandResponse}(0)
-        # start a new interactive thread to listen for GUI commands
-        Threads.@spawn :interactive uci_loop(uci_chan_in, uci_chan_out)
+        # start a new interactive thread to communicate with the GUI
+        uci_loop()
 
-        init_sequence(uci_chan_in, uci_chan_out)
+        init_sequence()
 
-        return uci_chan_in, uci_chan_out
+        return UCI_CHAN_IN, UCI_CHAN_OUT
     else
         error("UCI already started?")
     end
 end
 
-"talk to the GUI over UCI stdin/sdtout inside an interactive thread"
-function uci_loop(uci_chan_in::Channel{UCICommandReceive}, uci_chan_out::Channel{UCICommandResponse})
+function readline_loop()
+    for line in eachline()
+        @debug "reading line $line"
+        cmd = parse_uci(line)
+        @debug "parsed command $cmd"
+        if cmd isa UCIError
+            @warn "UCI error: $(cmd.msg)"
+        else
+            put!(UCI_CHAN_IN, cmd)
+        end
+    end
+end
+
+function publish_loop()
     while true
-        if isready(uci_chan_out)
-            response = take!(uci_chan_out)
+        @debug "publish loop iteration"
+        response = take!(UCI_CHAN_OUT)
+        @debug "publishing response $response"
             @assert response isa UCICommandResponse
             write_response(response)
-        end
+    end
+end
 
-        line = readline()
-        cmd = parse_uci(line)
-        put!(uci_chan_in, cmd)
+"""
+Talk to the GUI over UCI stdin/sdtout inside an interactive thread.
+Two async tasks independently read and write to the UCI channels.
+Reading input should not block writing output and vice versa.
+"""
+function uci_loop()
+    Threads.@spawn :interactive begin
+        @debug "interactive uci thread started"
+        @async readline_loop()
+        @async publish_loop()
     end
 end
 
