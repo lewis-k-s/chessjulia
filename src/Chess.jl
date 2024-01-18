@@ -1,18 +1,25 @@
 module Chess
 
+include("Pieces.jl")
+include("Squares.jl")
 include("Boards.jl")
+include("AlgebraicNotation.jl")
 include("Uci.jl")
 include("Fen.jl")
 include("Games.jl")
 
+using .Pieces
 using .Games
 using .Boards
-import .Uci
+import .Uci: Settings, parse_uci
 import .Fen: parse_fen
 
 export 
     start,
+    stop,
+    search,
     Game, 
+    Settings,
     Board, 
     Rank, 
     File, 
@@ -20,6 +27,7 @@ export
     Piece,
     Empty,
     parse_fen,
+    parse_uci,
     new_board, 
     print_board, 
     print_extended_board, 
@@ -47,13 +55,19 @@ export
     QUEEN_B,
     KING_B
 
-function start()
+"""
+Starts the engine. The UCI interface will always run in a separate thread,
+but the main engine loop will block the caller unless run with @async.
+"""
+function start(settings ::Uci.Settings = Uci.Settings())
     # TODO: this will also need to return an Options instance
-    uci_chan_in, uci_chan_out = Uci.start()
+    uci_chan_in, uci_chan_out = Uci.start(settings)
 
     if take!(uci_chan_in) isa Uci.UCINewGame
-        game = Game()
-        engine_loop(game, uci_chan_in, uci_chan_out)
+        game = Game(settings)
+        # A uci GUI can tell us to stop thinking. At that point we just wait on new inputs
+        # so 'async' will force the engine to yield when waiting on the channel instead of looping infinitely
+        wait(@async engine_loop(game, uci_chan_in, uci_chan_out))
     # should handle `position` without `newgame` ??
     else error("UCI: expected UCINewGame")
     end
@@ -69,11 +83,16 @@ function engine_loop(game::Game, uci_chan_in, uci_chan_out)
     searching = false
     search_progress = Search(game)
     while true
-        if isready(uci_chan_in)
+        @debug "engine loop: waiting for UCI command"
+        if !isready(uci_chan_in) && searching
+            search_progress = search(game, search_progress)
+            put!(uci_chan_out, search_progress.info)
+        else
             @debug "engine loop: reading new UCI command"
             cmd = take!(uci_chan_in)
             @assert cmd isa Uci.UCICommandReceive
             if cmd isa Uci.UCIGo
+                @debug "engine loop: UCI go"
                 searching = true
                 search_progress = search(game, search_progress)
                 put!(uci_chan_out, search_progress.info)
@@ -85,14 +104,13 @@ function engine_loop(game::Game, uci_chan_in, uci_chan_out)
                 put!(uci_chan_out, Uci.UCIBestMove("TODO", "TODO"))
             elseif cmd isa Uci.UCIQuit
                 @debug "UCI: quitting"
+                stop()
                 break
             else error("UCI: unexpected command")
             end
-        elseif searching
-            search_progress = search(game, search_progress)
-            put!(uci_chan_out, search_progress.info)
         end
     end
+    @debug "stopping engine loop"
 end
 
 """
@@ -110,6 +128,11 @@ end
 "`setpos` returns a new Game object. So its not really setting but resetting"
 function setpos(fen::String)
     return fen == "startpos" ?  Game() : Game(parse_fen(fen)...)
+end
+
+function stop()
+    @debug "Stopping UCI thread"
+    Uci.UCI_SHOULD_CONTINUE[] = false
 end
 
 end # module chessjl

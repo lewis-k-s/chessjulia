@@ -28,7 +28,7 @@
         @testset "En passant" begin
             fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
             _b, _t, _c, en_passant, rest... = parse_fen(fen)
-            @test en_passant == Set(sq_ix(3, 5))
+            @test en_passant == Set(sq_ix(5, 3))
         end
     end
 

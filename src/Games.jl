@@ -1,7 +1,8 @@
 module Games
 
-import ..Boards: Board, new_board, Square, Piece, PieceColour, WHITE
-import ..Uci: UCIInfo
+import ..Pieces: Piece, PieceColour, WHITE
+import ..Boards: Board, new_board, Square 
+import ..Uci: UCIInfo, Settings
 
 export 
     Game, 
@@ -15,7 +16,8 @@ mutable struct Game
     en_passant :: Set{Int}
     halfmove_clock :: Int
     fullmove_number :: Int
-    Game() = new(new_board(), WHITE, Set(), Set(), 0, 0)
+    settings :: Settings
+    Game(settings = Settings()) = new(new_board(), WHITE, Set(), Set(), 0, 0, settings)
 end
 
 # TODO: allow init sequence `setoption` to set these
@@ -49,7 +51,7 @@ struct Search
     movestogo :: Int
     infinite :: Bool
     info :: UCIInfo
-    Search(game) = new(game, 0, 0, 0, 0, 0, 0, 0, false)
+    Search(game) = new(game, 0, 0, 0, 0, 0, 0, 0, false, UCIInfo(0, 0, 0, 0))
 end
 
 end
