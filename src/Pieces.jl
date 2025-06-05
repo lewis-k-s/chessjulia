@@ -109,6 +109,22 @@ const KING_B = Piece(KING, BLACK)
 piece_colour(p::Piece) = PieceColour(p.val & COLOUR_MASK)
 piece_type(p::Piece) = PieceType(p.val & TYPE_MASK)
 
+"Convert a chess piece to a short string representation."
+piece_to_string(::Empty) = "--"
+function piece_to_string(p::Piece)
+    ptype = piece_type(p)
+    piece_str = ptype == KING ? "K" :
+                ptype == QUEEN ? "Q" :
+                ptype == ROOK ? "R" :
+                ptype == BISHOP ? "B" :
+                ptype == KNIGHT ? "N" :
+                ptype == PAWN ? "P" : "?"
+
+    color_str = piece_colour(p) == WHITE ? "W" : "B"
+
+    return color_str * piece_str
+end
+
 Base.show(io::IO, p::AbstractPiece) = show(io, piece_to_string(p))
 Base.zero(::Type{AbstractPiece}) = Empty()
 (==)(a::Empty, b::Empty) = true
