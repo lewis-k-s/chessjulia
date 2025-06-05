@@ -2,6 +2,7 @@ module Boards
 
 import Base: ==
 using ..Pieces
+import ..Pieces: piece_to_string
 using ..Squares
 
 export
@@ -59,20 +60,6 @@ function from_matrix(board_mat::Matrix{AbstractPiece})
     Board(b_vec)
 end
 
-piece_to_string(e::Empty) = "--"
-function piece_to_string(p::Piece)
-    ptype = piece_type(p)
-    piece_str = ptype == KING ? "K" :
-                ptype == QUEEN ? "Q" :
-                ptype == ROOK ? "R" :
-                ptype == BISHOP ? "B" :
-                ptype == KNIGHT ? "N" :
-                ptype == PAWN ? "P" : "?"
-
-    color_str = piece_colour(p) == WHITE ? "W" : "B"
-
-    return color_str * piece_str
-end
 
 function print_board(b::Board)
     for r in 1:8
